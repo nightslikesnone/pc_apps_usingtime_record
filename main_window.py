@@ -6,9 +6,11 @@ import time
 from datetime import date, timedelta, datetime  # 添加datetime导入
 from database import get_today_total, get_today_software_summary, get_tomato_cycles  # 添加get_tomato_cycles导入
 from utils import get_icon_for_process, get_friendly_name, get_exe_path_by_process_name
-from tomato_clock import TomatoClock
+from tomato_clock import TomatoClock, TomatoState  # 添加TomatoState导入
 import psutil
 import os
+# 添加todolist导入
+from todolist import get_all_todos, add_todo, update_todo_completed, delete_todo
 
 
 def create_flet_app(monitor, tomato_clock=None):
@@ -69,7 +71,7 @@ def create_flet_app(monitor, tomato_clock=None):
                 ),
                 on_click=minimize_window,
             ),
-            margin=ft.margin.only(left=3),
+            margin=ft.margin.only(left=3, top=4),  # 调整top margin使图标居中
         )
 
         # 关闭按钮（整体向左移动约20px）
@@ -90,7 +92,7 @@ def create_flet_app(monitor, tomato_clock=None):
                 ),
                 on_click=close_window,
             ),
-            margin=ft.margin.only(right=12),
+            margin=ft.margin.only(right=12, top=4),  # 调整top margin使图标居中
         )
 
         # 标题栏行
@@ -176,7 +178,7 @@ def create_flet_app(monitor, tomato_clock=None):
                 if work_minutes > 0 and break_minutes > 0:
                     if tomato_clock:
                         tomato_clock.set_durations(work_minutes, break_minutes)
-                        current_settings_text.value = f"当前设置：工作{work_minutes}分钟，休息{break_minutes}分钟"
+                        current_settings_text.value = f"当前设置：工作{work_minutes}分钟，休息{break_mins}分钟"
                         page.update()
                 else:
                     # 输入值无效，提示用户
@@ -197,6 +199,8 @@ def create_flet_app(monitor, tomato_clock=None):
             work_minutes_input.value = str(work_mins)
             break_minutes_input.value = str(break_mins)
             current_settings_text.value = f"当前设置：工作{work_mins}分钟，休息{break_mins}分钟"
+            # 修复初始显示时间
+            tomato_display.value = tomato_clock.get_formatted_time()
 
         # 自定义时长控件 - 通过输入框设置
         custom_duration_controls = ft.Column([
@@ -226,6 +230,126 @@ def create_flet_app(monitor, tomato_clock=None):
             margin=ft.margin.symmetric(vertical=10)
         )
 
+        # TodoList区域
+        todo_input = ft.TextField(
+            label="添加新任务",
+            width=300,
+            height=40,
+            border_radius=8,
+            content_padding=ft.padding.only(left=10, right=10),
+            on_submit=None  # 将在后面设置
+        )
+        
+        todo_list_view = ft.ListView(
+            controls=[],
+            height=300,
+            auto_scroll=False,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        
+        # 刷新TodoList的函数
+        def refresh_todo_list():
+            todos = get_all_todos()
+            controls = []
+            for todo in todos:
+                # 创建复选框
+                checkbox = ft.Checkbox(
+                    value=todo.completed,
+                    on_change=lambda e, todo_id=todo.id: toggle_todo_completed(todo_id, e.control.value)
+                )
+                # 创建任务文本
+                todo_text = ft.Text(
+                    todo.title,
+                    size=16,
+                    color=ft.Colors.GREY if todo.completed else ft.Colors.BLACK,
+                    font_family="Microsoft YaHei",
+                    text_align=ft.TextAlign.LEFT,
+                    expand=True
+                )
+                # 删除按钮
+                delete_btn = ft.IconButton(
+                    icon=ft.Icons.DELETE,
+                    icon_color=ft.Colors.RED,
+                    tooltip="删除",
+                    on_click=lambda e, todo_id=todo.id: delete_todo_item(todo_id)
+                )
+                
+                # 任务行
+                todo_row = ft.Row([
+                    checkbox,
+                    todo_text,
+                    delete_btn
+                ], alignment=ft.MainAxisAlignment.START, expand=True)
+                
+                controls.append(
+                    ft.Container(
+                        content=todo_row,
+                        padding=ft.padding.symmetric(horizontal=10, vertical=5),
+                        bgcolor="#f9f9f9" if todo.completed else "#ffffff",
+                        border_radius=5,
+                        margin=ft.margin.only(bottom=5)
+                    )
+                )
+            
+            todo_list_view.controls = controls
+            page.update()
+        
+        # 切换任务完成状态
+        def toggle_todo_completed(todo_id, completed):
+            update_todo_completed(todo_id, completed)
+            refresh_todo_list()
+        
+        # 删除任务
+        def delete_todo_item(todo_id):
+            delete_todo(todo_id)
+            refresh_todo_list()
+        
+        # 添加新任务
+        def add_new_todo(e):
+            title = todo_input.value.strip()
+            if title:
+                add_todo(title)
+                todo_input.value = ""
+                refresh_todo_list()
+        
+        # 设置回车提交
+        todo_input.on_submit = add_new_todo
+        
+        # 添加按钮
+        add_btn = ft.ElevatedButton(
+            "添加",
+            icon=ft.Icons.ADD,
+            on_click=add_new_todo,
+            height=40,
+            style=ft.ButtonStyle(
+                bgcolor={"": "#f0f0f0", "hovered": "#e0e0e0"},
+                shape={"": ft.RoundedRectangleBorder(radius=8)},
+                side={"": ft.BorderSide(1, "#d0d0d0")},
+                padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                color={"": ft.Colors.BLACK, "hovered": ft.Colors.BLACK}
+            )
+        )
+        
+        # TodoList输入区域
+        todo_input_row = ft.Row([
+            todo_input,
+            add_btn
+        ], alignment=ft.MainAxisAlignment.CENTER, spacing=10)
+        
+        # TodoList主区域
+        todo_section = ft.Container(
+            content=ft.Column([
+                ft.Text("待办事项", size=20, weight="bold", font_family="Microsoft YaHei"),
+                ft.Divider(height=20),
+                todo_input_row,
+                ft.Divider(height=10),
+                todo_list_view
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+            padding=20,
+            margin=ft.margin.symmetric(vertical=10),
+            expand=True
+        )
 
         # 内容区域
         software_list_view = ft.ListView(
@@ -260,12 +384,14 @@ def create_flet_app(monitor, tomato_clock=None):
         # 主内容容器 - 用于切换显示
         main_content = ft.Stack([
             ft.Container(content=tomato_section, visible=False, expand=True),  # 初始为隐藏
-            ft.Container(content=software_stats_section, visible=True, expand=True)  # 初始为显示
+            ft.Container(content=software_stats_section, visible=True, expand=True),  # 初始为显示
+            ft.Container(content=todo_section, visible=False, expand=True)  # TodoList页面初始隐藏
         ])
         
         # 获取当前可见的容器引用
         tomato_container = main_content.controls[0]
         stats_container = main_content.controls[1]
+        todo_container = main_content.controls[2]
 
         # 当前选中的页面状态
         current_page = "stats"  # 默认为统计页面
@@ -275,6 +401,7 @@ def create_flet_app(monitor, tomato_clock=None):
             nonlocal current_page
             tomato_container.visible = True
             stats_container.visible = False
+            todo_container.visible = False
             current_page = "tomato"
             # 更新按钮样式
             update_button_styles()
@@ -284,9 +411,20 @@ def create_flet_app(monitor, tomato_clock=None):
             nonlocal current_page
             tomato_container.visible = False
             stats_container.visible = True
+            todo_container.visible = False
             current_page = "stats"
             update_button_styles()
             update_data_once()  # 刷新统计数据
+            page.update()
+        
+        async def show_todo_page(e):
+            nonlocal current_page
+            tomato_container.visible = False
+            stats_container.visible = False
+            todo_container.visible = True
+            current_page = "todo"
+            update_button_styles()
+            refresh_todo_list()  # 刷新待办事项列表
             page.update()
 
         # 更新按钮样式
@@ -302,6 +440,14 @@ def create_flet_app(monitor, tomato_clock=None):
             # 更新时间按钮样式
             stats_btn.style = ft.ButtonStyle(
                 bgcolor={"": "#b3d9ff" if current_page == "stats" else "#f0f0f0", "hovered": "#e0e0e0"},
+                shape={"": ft.RoundedRectangleBorder(radius=8)},
+                side={"": ft.BorderSide(1, "#d0d0d0")},
+                padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                color={"": ft.Colors.BLACK, "hovered": ft.Colors.BLACK}  # 设置文字颜色为黑色，包括悬停状态
+            )
+            # 更新待办事项按钮样式
+            todo_btn.style = ft.ButtonStyle(
+                bgcolor={"": "#b3d9ff" if current_page == "todo" else "#f0f0f0", "hovered": "#e0e0e0"},
                 shape={"": ft.RoundedRectangleBorder(radius=8)},
                 side={"": ft.BorderSide(1, "#d0d0d0")},
                 padding=ft.padding.symmetric(horizontal=10, vertical=8),
@@ -352,11 +498,29 @@ def create_flet_app(monitor, tomato_clock=None):
             height=50,
             width=120
         )
+        
+        # 新增待办事项按钮
+        todo_btn = ft.ElevatedButton(
+            "待办事项",
+            icon=ft.Icons.CHECKLIST,
+            icon_color=ft.Colors.BLACK,  # 设置图标颜色为黑色
+            on_click=show_todo_page,
+            style=ft.ButtonStyle(
+                bgcolor={"": "#b3d9ff" if current_page == "todo" else "#f0f0f0", "hovered": "#e0e0e0"},
+                shape={"": ft.RoundedRectangleBorder(radius=8)},
+                side={"": ft.BorderSide(1, "#d0d0d0")},
+                padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                color={"": ft.Colors.BLACK, "hovered": ft.Colors.BLACK}  # 设置文字颜色为黑色，包括悬停状态
+            ),
+            height=50,
+            width=120
+        )
 
         sidebar = ft.Container(
             content=ft.Column([
                 stats_btn,  # 时间按钮在上
-                tomato_btn  # 番茄钟按钮在下
+                tomato_btn,  # 番茄钟按钮在下
+                todo_btn   # 待办事项按钮在最下面
             ], 
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=15),
@@ -389,6 +553,13 @@ def create_flet_app(monitor, tomato_clock=None):
          # 设置番茄钟回调函数
         if tomato_clock:
             def on_state_change(state, remaining_time):
+                # 检查页面是否仍然有效
+                try:
+                    if not page.session:
+                        return
+                except:
+                    return
+                
                 # 使用 page.run_task 在UI线程中安全地更新界面
                 async def update_ui():
                     tomato_display.value = tomato_clock.get_formatted_time()
@@ -399,6 +570,13 @@ def create_flet_app(monitor, tomato_clock=None):
                 page.run_task(update_ui)
             
             def on_tick(state, remaining_time):
+                # 检查页面是否仍然有效
+                try:
+                    if not page.session:
+                        return
+                except:
+                    return
+                
                 # 使用 page.run_task 在UI线程中安全地更新界面
                 async def update_ui():
                     tomato_display.value = tomato_clock.get_formatted_time()
@@ -409,6 +587,13 @@ def create_flet_app(monitor, tomato_clock=None):
                 page.run_task(update_ui)
                 
             def on_cycle_complete(state, completed_cycles):
+                # 检查页面是否仍然有效
+                try:
+                    if not page.session:
+                        return
+                except:
+                    return
+                
                 # 使用 page.run_task 在UI线程中安全地更新界面
                 async def update_ui():
                     tomato_completed_cycles.value = f"完成周期: {completed_cycles}"
@@ -417,14 +602,49 @@ def create_flet_app(monitor, tomato_clock=None):
                 # 使用 page.run_task 调度异步任务
                 page.run_task(update_ui)
             
+            # 新增：处理番茄钟阶段完成的回调
+            def on_phase_complete(state):
+                # 检查页面是否仍然有效
+                try:
+                    if not page.session:
+                        return
+                except:
+                    return
+                
+                # 使用 page.run_task 在UI线程中安全地显示提醒
+                async def show_notification():
+                    if state == TomatoState.WORK:
+                        # 工作完成，显示休息提醒
+                        page.snack_bar = ft.SnackBar(
+                            ft.Text("工作时间结束！开始休息吧！", size=16),
+                            bgcolor="#4CAF50",
+                            duration=3000
+                        )
+                    elif state == TomatoState.BREAK or state == TomatoState.LONG_BREAK:
+                        # 休息完成，显示工作提醒
+                        page.snack_bar = ft.SnackBar(
+                            ft.Text("休息时间结束！番茄钟已重置。", size=16),
+                            bgcolor="#2196F3",
+                            duration=3000
+                        )
+                    page.snack_bar.open = True
+                    page.update()
+                
+                # 使用 page.run_task 调度异步任务
+                page.run_task(show_notification)
+            
             tomato_clock.on_state_change = on_state_change
             tomato_clock.on_tick = on_tick
             tomato_clock.on_cycle_complete = on_cycle_complete
+            tomato_clock.on_phase_complete = on_phase_complete  # 添加新的回调
             
             # 启动时从数据库加载今天已完成的周期数
             today_str = datetime.now().strftime('%Y-%m-%d')
             saved_cycles = get_tomato_cycles(today_str)
             tomato_completed_cycles.value = f"完成周期: {saved_cycles}"
+            
+            # 修复初始显示时间
+            tomato_display.value = tomato_clock.get_formatted_time()
 
         # 后台数据更新线程
         def update_data():
@@ -476,11 +696,11 @@ def create_flet_app(monitor, tomato_clock=None):
                         
                         # 如果成功获取了exe路径，就尝试获取图标
                         icon_control = ft.Icon(ft.Icons.DESKTOP_WINDOWS, size=20, color=ft.Colors.GREY)
-                        if exe_path and os.path.exists(exe_path):
-                            icon_path = get_icon_for_process(str(display_name), exe_path)
-                            if icon_path and os.path.exists(icon_path):
-                                # 使用字符串形式的fit参数
-                                icon_control = ft.Image(src=icon_path, width=20, height=20, fit="contain")
+                        # 尝试获取图标，即使exe_path不存在也尝试从缓存中获取
+                        icon_path = get_icon_for_process(str(display_name), exe_path)
+                        if icon_path and os.path.exists(icon_path):
+                            # 使用字符串形式的fit参数
+                            icon_control = ft.Image(src=icon_path, width=20, height=20, fit="contain")
                         
                         # 如果有PID，获取友好名称
                         if pid is not None:
@@ -518,5 +738,8 @@ def create_flet_app(monitor, tomato_clock=None):
                 traceback.print_exc()
 
         threading.Thread(target=update_data, daemon=True).start()
+
+        # 初始加载待办事项列表
+        refresh_todo_list()
 
     return main

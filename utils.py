@@ -24,14 +24,38 @@ class SHFILEINFO(ctypes.Structure):
         ("szTypeName", wintypes.CHAR * 80)
     ]
 
+# 修改缓存字典，使用进程名作为键
 _icon_cache = {}
 
 def get_icon_for_process(process_name, exe_path):
+    # 使用进程名作为缓存键，而不是exe_path
+    cache_key = process_name
+    
+    if cache_key in _icon_cache:
+        cached_path = _icon_cache[cache_key]
+        # 检查缓存的文件是否仍然存在
+        if os.path.exists(cached_path):
+            return cached_path
+        else:
+            # 如果文件不存在，从缓存中移除
+            del _icon_cache[cache_key]
+    
+    # 如果exe_path不存在，尝试从已知位置查找
     if exe_path is None or not os.path.exists(exe_path):
-        return None
-
-    if exe_path in _icon_cache:
-        return _icon_cache[exe_path]
+        # 尝试从系统路径或其他常见位置查找
+        possible_paths = [
+            f"C:\\Program Files\\{process_name}",
+            f"C:\\Program Files (x86)\\{process_name}",
+            f"C:\\Windows\\System32\\{process_name}"
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                exe_path = path
+                break
+        
+        # 如果还是找不到，返回None
+        if exe_path is None or not os.path.exists(exe_path):
+            return None
 
     try:
         shfi = SHFILEINFO()
@@ -69,12 +93,12 @@ def get_icon_for_process(process_name, exe_path):
         # 缩放图标
         img = img.resize((16, 16), Image.LANCZOS)
         
-        # 保存到临时文件并返回文件路径
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        temp_file.close()
-        img.save(temp_file.name, 'PNG')
-        _icon_cache[exe_path] = temp_file.name
-        return temp_file.name  # 返回临时文件路径
+        # 保存到临时文件并返回文件路径，使用进程名作为文件名的一部分
+        temp_dir = tempfile.gettempdir()
+        temp_file_path = os.path.join(temp_dir, f"icon_{process_name.replace('.', '_').replace(' ', '_')}.png")
+        img.save(temp_file_path, 'PNG')
+        _icon_cache[cache_key] = temp_file_path
+        return temp_file_path  # 返回临时文件路径
 
     except Exception as e:
         import traceback

@@ -28,6 +28,7 @@ def main():
 
     # 窗口关闭后停止监控
     monitor.stop()
+    # 移除 tomato_clock.stop() 调用，避免 session destroyed 错误
     print("程序退出")
 
 if __name__ == "__main__":

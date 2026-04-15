@@ -4,6 +4,7 @@ from enum import Enum
 from datetime import datetime, timedelta
 from flet import Page
 from database import get_tomato_cycles, update_tomato_cycles, get_tomato_settings, save_tomato_settings
+import winsound  # 添加winsound导入用于播放系统提示音
 
 class TomatoState(Enum):
     WORK = "工作中"
@@ -31,11 +32,13 @@ class TomatoClock:
         self.on_state_change = None  # 参数: state, remaining_time
         self.on_tick = None  # 参数: state, remaining_time
         self.on_cycle_complete = None  # 参数: state, completed_cycles
+        self.on_phase_complete = None  # 参数: state
         
         # 控制变量
         self._running = False
         self._paused = False
         self._thread = None
+        self._app_closing = False  # 添加应用关闭标志
 
     def set_durations(self, work_minutes, break_minutes, long_break_minutes=15):
         """设置工作和休息时长（以分钟为单位）"""
@@ -83,18 +86,18 @@ class TomatoClock:
 
     def _start_timer(self):
         """内部方法：启动计时器线程"""
-        if self._thread and self._thread.is_alive():
-            self._paused = False
-            return
-        
-        self._running = True
+        # 确保之前的运行状态已停止
+        self._running = False
         self._paused = False
+        
+        # 启动新线程
+        self._running = True
         self._thread = threading.Thread(target=self._run_timer, daemon=True)
         self._thread.start()
 
     def _run_timer(self):
         """内部方法：执行倒计时逻辑"""
-        last_update = time.time()
+        last_tick_time = time.time()
         
         while self._running and self.remaining_time > 0:
             if self._paused:
@@ -102,11 +105,11 @@ class TomatoClock:
                 continue
             
             current_time = time.time()
-            elapsed = int(current_time - last_update)
             
-            if elapsed >= 1:  # 每秒更新一次
-                self.remaining_time -= elapsed
-                last_update = current_time
+            # 每秒减少1秒（更简单可靠的方式）
+            if current_time - last_tick_time >= 1.0:
+                self.remaining_time -= 1
+                last_tick_time = current_time
                 
                 if self.on_tick:
                     self.on_tick(self.state, self.remaining_time)
@@ -124,7 +127,20 @@ class TomatoClock:
 
     def _handle_completion(self):
         """处理计时完成的逻辑"""
+        # 首先停止当前计时器
+        self._running = False
+        
+        # 如果应用正在关闭，不处理完成事件（包括不播放声音）
+        if self._app_closing:
+            return
+        
         if self.state == TomatoState.WORK:
+            # 工作完成，播放提示音
+            try:
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)  # 播放信息提示音
+            except Exception:
+                pass  # 如果无法播放声音，忽略错误
+            
             # 工作完成，进入休息
             self.total_cycles_completed += 1
             self.current_cycle_count += 1
@@ -137,25 +153,25 @@ class TomatoClock:
             if self.on_cycle_complete:
                 self.on_cycle_complete(self.state, self.total_cycles_completed)
             
-            # 如果启用了循环模式，自动进入休息，否则停止
-            if self.loop_enabled:
-                self.start_break()
-            else:
-                # 非循环模式下，只进行一轮工作后停止
-                self.stop()
+            # 调用阶段完成回调
+            if self.on_phase_complete:
+                self.on_phase_complete(self.state)
+            
+            # 自动进入休息（无论循环模式是否启用）
+            self.start_break()
         elif self.state == TomatoState.BREAK or self.state == TomatoState.LONG_BREAK:
-            # 休息完成，如果启用了循环模式，则继续工作
-            if self.loop_enabled:
-                # 检查是否需要长休息
-                if self.current_cycle_count >= self.cycles_before_long_break:
-                    # 长休息后重置循环计数
-                    self.current_cycle_count = 0
-                
-                # 继续下一轮工作
-                self.start_work()
-            else:
-                # 非循环模式下，休息后停止
-                self.stop()
+            # 休息完成，播放提示音
+            try:
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)  # 播放信息提示音
+            except Exception:
+                pass  # 如果无法播放声音，忽略错误
+            
+            # 调用阶段完成回调
+            if self.on_phase_complete:
+                self.on_phase_complete(self.state)
+            
+            # 休息结束后自动重置番茄钟（而不是继续下一轮工作）
+            self.reset()
 
     def pause(self):
         """暂停倒计时"""
@@ -176,10 +192,12 @@ class TomatoClock:
     def stop(self):
         """停止倒计时并重置"""
         self._running = False
+        self._app_closing = True  # 标记应用正在关闭
         self.state = TomatoState.STOPPED
         self.remaining_time = self.work_duration
         self.current_cycle_count = 0
-        if self.on_state_change:
+        # 只有在应用未关闭时才调用回调
+        if not self._app_closing and self.on_state_change:
             self.on_state_change(self.state, self.remaining_time)
 
     def reset(self):

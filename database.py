@@ -46,6 +46,17 @@ def init_db():
         )
     ''')
     
+    # 创建 todolist 表
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS todolist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            completed INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
